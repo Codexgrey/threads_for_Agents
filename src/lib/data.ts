@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db, hasDatabase } from "@/db";
 import {
   posts as postsTable,
@@ -79,6 +80,7 @@ function buildMemory(): MemoryStore {
       repostCount: sp.repostCount,
       likedByMe: false,
       repostedByMe: false,
+      repostedBy: null,
       createdAt: new Date(now - sp.minutesAgo * 60_000).toISOString(),
       author,
     };
@@ -126,6 +128,7 @@ function toFeedPost(row: JoinedRow): FeedPost {
     repostCount: row.post.repostCount,
     likedByMe: false,
     repostedByMe: false,
+    repostedBy: null,
     createdAt: row.post.createdAt.toISOString(),
     author: toAuthor(row.author),
   };
@@ -150,15 +153,61 @@ function toAuthor(u: typeof usersTable.$inferSelect): Author {
 
 export async function getFeed(limit = 50, offset = 0): Promise<FeedPost[]> {
   if (hasDatabase) {
-    const rows = await db
-      .select({ post: postsTable, author: usersTable })
-      .from(postsTable)
-      .innerJoin(usersTable, eq(postsTable.authorId, usersTable.id))
-      .where(isNull(postsTable.parentId))
-      .orderBy(desc(postsTable.createdAt))
-      .limit(limit)
-      .offset(offset);
-    return rows.map(toFeedPost);
+    // Overfetch both sides generously, merge in JS, then slice. Simple and
+    // correct at this app's scale; would need a proper SQL-level merge if
+    // the post/repost volume ever got large enough for offset to matter.
+    const fetchSize = limit + offset + 100;
+    const reposter = alias(usersTable, "reposter");
+
+    const [postRows, repostRows] = await Promise.all([
+      db
+        .select({ post: postsTable, author: usersTable })
+        .from(postsTable)
+        .innerJoin(usersTable, eq(postsTable.authorId, usersTable.id))
+        .where(isNull(postsTable.parentId))
+        .orderBy(desc(postsTable.createdAt))
+        .limit(fetchSize),
+      db
+        .select({
+          post: postsTable,
+          author: usersTable,
+          reposter,
+          repostedAt: repostsTable.createdAt,
+        })
+        .from(repostsTable)
+        .innerJoin(postsTable, eq(repostsTable.postId, postsTable.id))
+        .innerJoin(usersTable, eq(postsTable.authorId, usersTable.id))
+        .innerJoin(reposter, eq(repostsTable.userId, reposter.id))
+        .where(isNull(postsTable.parentId))
+        .orderBy(desc(repostsTable.createdAt))
+        .limit(fetchSize),
+    ]);
+
+    // Dedupe per post id, keeping whichever event (original post, or its
+    // most recent repost) is newest — that's what makes an old post "jump
+    // back up" the feed when someone reposts it, instead of appearing twice.
+    type Stamped = FeedPost & { sortAt: string };
+    const merged = new Map<string, Stamped>();
+
+    for (const r of postRows) {
+      const p = toFeedPost(r);
+      merged.set(p.id, { ...p, sortAt: p.createdAt });
+    }
+    for (const r of repostRows) {
+      const sortAt = r.repostedAt.toISOString();
+      const existing = merged.get(r.post.id);
+      if (existing && existing.sortAt >= sortAt) continue;
+      merged.set(r.post.id, {
+        ...toFeedPost({ post: r.post, author: r.author }),
+        repostedBy: toAuthor(r.reposter),
+        sortAt,
+      });
+    }
+
+    return [...merged.values()]
+      .sort((a, b) => b.sortAt.localeCompare(a.sortAt))
+      .slice(offset, offset + limit)
+      .map(({ sortAt: _sortAt, ...post }) => post);
   }
   return mem()
     .ordered.filter((p) => p.parentId === null)
@@ -230,6 +279,49 @@ export async function getPostsByAuthor(handle: string): Promise<FeedPost[]> {
   return mem().ordered.filter(
     (p) => p.author.handle === clean && p.parentId === null,
   );
+}
+
+// A profile's "Posts" tab: their own top-level posts, merged with posts they
+// reposted (shown as the original post + a "reposted by" annotation),
+// ordered by whichever is more recent — own post time, or repost time.
+export async function getProfileTimeline(profile: Author): Promise<FeedPost[]> {
+  const own = await getPostsByAuthor(profile.handle);
+  if (!hasDatabase) return own; // reposts aren't tracked in memory mode
+
+  const repostRows = await db
+    .select({ post: postsTable, author: usersTable, repostedAt: repostsTable.createdAt })
+    .from(repostsTable)
+    .innerJoin(postsTable, eq(repostsTable.postId, postsTable.id))
+    .innerJoin(usersTable, eq(postsTable.authorId, usersTable.id))
+    .where(and(eq(repostsTable.userId, profile.id), isNull(postsTable.parentId)))
+    .orderBy(desc(repostsTable.createdAt));
+
+  type Stamped = FeedPost & { sortAt: string };
+  const merged = new Map<string, Stamped>();
+
+  for (const p of own) {
+    merged.set(p.id, { ...p, sortAt: p.createdAt });
+  }
+  for (const r of repostRows) {
+    const id = r.post.id;
+    const sortAt = r.repostedAt.toISOString();
+    const existing = merged.get(id);
+    // Reposting your own post: keep it as an authored post, don't re-badge it.
+    if (existing && existing.repostedBy === null && r.author.handle === profile.handle) {
+      if (sortAt > existing.sortAt) merged.set(id, { ...existing, sortAt });
+      continue;
+    }
+    const stamped: Stamped = {
+      ...toFeedPost({ post: r.post, author: r.author }),
+      repostedBy: profile,
+      sortAt,
+    };
+    if (!existing || sortAt > existing.sortAt) merged.set(id, stamped);
+  }
+
+  return [...merged.values()]
+    .sort((a, b) => b.sortAt.localeCompare(a.sortAt))
+    .map(({ sortAt: _sortAt, ...post }) => post);
 }
 
 export async function listUsers(): Promise<Author[]> {

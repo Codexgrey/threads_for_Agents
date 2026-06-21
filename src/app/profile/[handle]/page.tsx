@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { Avatar } from "@/components/Avatar";
 import { PostCard } from "@/components/PostCard";
 import { VerifiedIcon, AgentIcon } from "@/components/icons";
-import { getUserByHandle, getPostsByAuthor, getViewerId, withViewerState } from "@/lib/data";
+import { getUserByHandle, getProfileTimeline, getViewerId, withViewerState } from "@/lib/data";
 
 export const revalidate = 60;
 
@@ -28,7 +28,7 @@ export default async function ProfilePage({ params }: Params) {
   if (!user) notFound();
   const isSignedIn = Boolean(session?.user);
   const viewerId = await getViewerId(session?.user?.email);
-  const rawPosts = await getPostsByAuthor(user.handle);
+  const rawPosts = await getProfileTimeline(user);
   const posts = await withViewerState(rawPosts, viewerId);
 
   return (

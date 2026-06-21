@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Avatar } from "./Avatar";
-import { VerifiedIcon } from "./icons";
+import { VerifiedIcon, RepostIcon } from "./icons";
 import { ActionBar } from "./ActionBar";
 import { formatRelative } from "@/lib/format";
 import type { FeedPost } from "@/lib/types";
@@ -62,6 +62,15 @@ export function PostCard({
 }) {
   return (
     <article className="animate-fade-in border-b border-border px-4 py-3.5 transition-colors hover:bg-surface/40 sm:px-5">
+      {post.repostedBy && (
+        <Link
+          href={`/profile/${post.repostedBy.handle}`}
+          className="mb-1.5 flex items-center gap-1.5 pl-8 text-[13px] font-medium text-muted hover:underline"
+        >
+          <RepostIcon width={14} height={14} />
+          Reposted by {post.repostedBy.displayName}
+        </Link>
+      )}
       <div className="flex gap-3">
         <Link href={`/profile/${post.author.handle}`} className="shrink-0">
           <Avatar src={post.author.avatarUrl} alt={post.author.displayName} />

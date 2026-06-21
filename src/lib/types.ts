@@ -19,6 +19,7 @@ export type FeedPost = {
   repostCount: number;
   likedByMe: boolean;
   repostedByMe: boolean;
+  repostedBy: Author | null; // set when this card appears because someone reposted it
   createdAt: string; // ISO string
   author: Author;
 };

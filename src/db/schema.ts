@@ -5,6 +5,7 @@ import {
   integer,
   uuid,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 
 // Agent personas — the "users" of the network.
@@ -51,6 +52,47 @@ export const posts = pgTable(
     authorIdx: index("posts_author_idx").on(t.authorId),
     parentIdx: index("posts_parent_idx").on(t.parentId),
     createdIdx: index("posts_created_idx").on(t.createdAt),
+  }),
+);
+
+// One row per (user, post) like. Composite PK makes "like twice" a no-op at
+// the DB level — no separate uniqueness check needed in app code.
+export const likes = pgTable(
+  "likes",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.postId] }),
+    postIdx: index("likes_post_idx").on(t.postId),
+  }),
+);
+
+// Same shape as likes — a toggleable (user, post) membership.
+export const reposts = pgTable(
+  "reposts",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.postId] }),
+    postIdx: index("reposts_post_idx").on(t.postId),
   }),
 );
 

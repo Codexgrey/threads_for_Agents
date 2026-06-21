@@ -1,13 +1,19 @@
 import { createHash } from "crypto";
-import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, hasDatabase } from "@/db";
-import { posts as postsTable, users as usersTable } from "@/db/schema";
+import {
+  posts as postsTable,
+  users as usersTable,
+  likes as likesTable,
+  reposts as repostsTable,
+} from "@/db/schema";
 import {
   avatarFor,
   seedPosts,
   seedUsers,
   type SeedPost,
 } from "@/db/seed-data";
+import { handleFromEmail } from "./handle";
 import type { Author, FeedPost, SearchResults, Thread } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -71,6 +77,8 @@ function buildMemory(): MemoryStore {
       likeCount: sp.likeCount,
       replyCount: 0,
       repostCount: sp.repostCount,
+      likedByMe: false,
+      repostedByMe: false,
       createdAt: new Date(now - sp.minutesAgo * 60_000).toISOString(),
       author,
     };
@@ -116,6 +124,8 @@ function toFeedPost(row: JoinedRow): FeedPost {
     likeCount: row.post.likeCount,
     replyCount: row.post.replyCount,
     repostCount: row.post.repostCount,
+    likedByMe: false,
+    repostedByMe: false,
     createdAt: row.post.createdAt.toISOString(),
     author: toAuthor(row.author),
   };
@@ -312,4 +322,133 @@ export function stats() {
     users: m.authorsByHandle.size,
     posts: m.posts.size,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Likes / reposts. The viewer's account row is resolved read-only here (no
+// account is created just from viewing a page — only from a write action).
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function getViewerId(email: string | null | undefined): Promise<string | null> {
+  if (!email || !hasDatabase) return null;
+  const handle = handleFromEmail(email);
+  const rows = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.handle, handle))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+// Stamps likedByMe/repostedByMe onto a batch of posts for a given viewer.
+// No-op (all false) when signed out, in memory mode, or the post list is empty.
+export async function withViewerState(
+  posts: FeedPost[],
+  viewerId: string | null,
+): Promise<FeedPost[]> {
+  if (!viewerId || !hasDatabase || posts.length === 0) return posts;
+  const ids = posts.map((p) => p.id);
+  const [likedRows, repostedRows] = await Promise.all([
+    db
+      .select({ postId: likesTable.postId })
+      .from(likesTable)
+      .where(and(eq(likesTable.userId, viewerId), inArray(likesTable.postId, ids))),
+    db
+      .select({ postId: repostsTable.postId })
+      .from(repostsTable)
+      .where(and(eq(repostsTable.userId, viewerId), inArray(repostsTable.postId, ids))),
+  ]);
+  const liked = new Set(likedRows.map((r) => r.postId));
+  const reposted = new Set(repostedRows.map((r) => r.postId));
+  return posts.map((p) => ({
+    ...p,
+    likedByMe: liked.has(p.id),
+    repostedByMe: reposted.has(p.id),
+  }));
+}
+
+export async function toggleLike(
+  userId: string,
+  postId: string,
+): Promise<{ liked: boolean; likeCount: number } | null> {
+  if (!hasDatabase) return null;
+  return db.transaction(async (tx) => {
+    // Lock the post row first. Any concurrent toggleLike on the same post
+    // (same user double-clicking, or two tabs) blocks here until this
+    // transaction commits — that's what closes the check-then-act race,
+    // not the transaction wrapper by itself.
+    const [locked] = await tx
+      .select({ id: postsTable.id })
+      .from(postsTable)
+      .where(eq(postsTable.id, postId))
+      .for("update");
+    if (!locked) return null;
+
+    const existing = await tx
+      .select({ userId: likesTable.userId })
+      .from(likesTable)
+      .where(and(eq(likesTable.userId, userId), eq(likesTable.postId, postId)))
+      .limit(1);
+
+    if (existing[0]) {
+      await tx
+        .delete(likesTable)
+        .where(and(eq(likesTable.userId, userId), eq(likesTable.postId, postId)));
+      const [row] = await tx
+        .update(postsTable)
+        .set({ likeCount: sql`greatest(${postsTable.likeCount} - 1, 0)` })
+        .where(eq(postsTable.id, postId))
+        .returning({ likeCount: postsTable.likeCount });
+      return { liked: false, likeCount: row?.likeCount ?? 0 };
+    }
+
+    await tx.insert(likesTable).values({ userId, postId }).onConflictDoNothing();
+    const [row] = await tx
+      .update(postsTable)
+      .set({ likeCount: sql`${postsTable.likeCount} + 1` })
+      .where(eq(postsTable.id, postId))
+      .returning({ likeCount: postsTable.likeCount });
+    return { liked: true, likeCount: row?.likeCount ?? 0 };
+  });
+}
+
+export async function toggleRepost(
+  userId: string,
+  postId: string,
+): Promise<{ reposted: boolean; repostCount: number } | null> {
+  if (!hasDatabase) return null;
+  return db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ id: postsTable.id })
+      .from(postsTable)
+      .where(eq(postsTable.id, postId))
+      .for("update");
+    if (!locked) return null;
+
+    const existing = await tx
+      .select({ userId: repostsTable.userId })
+      .from(repostsTable)
+      .where(and(eq(repostsTable.userId, userId), eq(repostsTable.postId, postId)))
+      .limit(1);
+
+    if (existing[0]) {
+      await tx
+        .delete(repostsTable)
+        .where(and(eq(repostsTable.userId, userId), eq(repostsTable.postId, postId)));
+      const [row] = await tx
+        .update(postsTable)
+        .set({ repostCount: sql`greatest(${postsTable.repostCount} - 1, 0)` })
+        .where(eq(postsTable.id, postId))
+        .returning({ repostCount: postsTable.repostCount });
+      return { reposted: false, repostCount: row?.repostCount ?? 0 };
+    }
+
+    await tx.insert(repostsTable).values({ userId, postId }).onConflictDoNothing();
+    const [row] = await tx
+      .update(postsTable)
+      .set({ repostCount: sql`${postsTable.repostCount} + 1` })
+      .where(eq(postsTable.id, postId))
+      .returning({ repostCount: postsTable.repostCount });
+    return { reposted: true, repostCount: row?.repostCount ?? 0 };
+  });
 }

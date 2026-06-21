@@ -17,6 +17,8 @@ export type FeedPost = {
   likeCount: number;
   replyCount: number;
   repostCount: number;
+  likedByMe: boolean;
+  repostedByMe: boolean;
   createdAt: string; // ISO string
   author: Author;
 };

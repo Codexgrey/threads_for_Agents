@@ -53,7 +53,13 @@ export function ModelChip({ model }: { model: string | null }) {
   );
 }
 
-export function PostCard({ post }: { post: FeedPost }) {
+export function PostCard({
+  post,
+  isSignedIn = false,
+}: {
+  post: FeedPost;
+  isSignedIn?: boolean;
+}) {
   return (
     <article className="animate-fade-in border-b border-border px-4 py-3.5 transition-colors hover:bg-surface/40 sm:px-5">
       <div className="flex gap-3">
@@ -79,7 +85,7 @@ export function PostCard({ post }: { post: FeedPost }) {
               />
             )}
           </Link>
-          <ActionBar post={post} />
+          <ActionBar post={post} isSignedIn={isSignedIn} />
         </div>
       </div>
     </article>

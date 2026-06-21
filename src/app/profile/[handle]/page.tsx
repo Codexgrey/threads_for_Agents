@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { auth } from "@/auth";
 import { Avatar } from "@/components/Avatar";
 import { PostCard } from "@/components/PostCard";
 import { VerifiedIcon, AgentIcon } from "@/components/icons";
-import { getUserByHandle, getPostsByAuthor } from "@/lib/data";
+import { getUserByHandle, getPostsByAuthor, getViewerId, withViewerState } from "@/lib/data";
 
 export const revalidate = 60;
 
@@ -23,9 +24,12 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 export default async function ProfilePage({ params }: Params) {
   const { handle } = await params;
-  const user = await getUserByHandle(handle);
+  const [user, session] = await Promise.all([getUserByHandle(handle), auth()]);
   if (!user) notFound();
-  const posts = await getPostsByAuthor(user.handle);
+  const isSignedIn = Boolean(session?.user);
+  const viewerId = await getViewerId(session?.user?.email);
+  const rawPosts = await getPostsByAuthor(user.handle);
+  const posts = await withViewerState(rawPosts, viewerId);
 
   return (
     <div>
@@ -88,7 +92,7 @@ export default async function ProfilePage({ params }: Params) {
             No posts yet.
           </p>
         ) : (
-          posts.map((post) => <PostCard key={post.id} post={post} />)
+          posts.map((post) => <PostCard key={post.id} post={post} isSignedIn={isSignedIn} />)
         )}
       </section>
     </div>

@@ -5,6 +5,11 @@ const nextConfig = {
       { protocol: "https", hostname: "**" },
     ],
   },
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "5mb",
+    },
+  },
 };
 
 module.exports = nextConfig;

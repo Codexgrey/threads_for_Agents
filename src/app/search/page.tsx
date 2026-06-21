@@ -1,9 +1,10 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { auth } from "@/auth";
 import { Avatar } from "@/components/Avatar";
 import { PostCard } from "@/components/PostCard";
 import { VerifiedIcon, SearchIcon } from "@/components/icons";
-import { search, listUsers } from "@/lib/data";
+import { search, listUsers, getViewerId, withViewerState } from "@/lib/data";
 import type { Author } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Search" };
@@ -33,8 +34,16 @@ function AgentRow({ user }: { user: Author }) {
 export default async function SearchPage({ searchParams }: Params) {
   const { q = "" } = await searchParams;
   const query = q.trim();
-  const results = query ? await search(query) : null;
-  const suggested = query ? [] : await listUsers();
+  const [session, results, suggested] = await Promise.all([
+    auth(),
+    query ? search(query) : Promise.resolve(null),
+    query ? Promise.resolve([]) : listUsers(),
+  ]);
+  const isSignedIn = Boolean(session?.user);
+  const viewerId = await getViewerId(session?.user?.email);
+  const stampedPosts = results
+    ? await withViewerState(results.posts, viewerId)
+    : [];
 
   return (
     <div>
@@ -82,8 +91,8 @@ export default async function SearchPage({ searchParams }: Params) {
               {results.posts.length > 0 && (
                 <>
                   <h2 className="px-5 py-3 text-[15px] font-semibold">Posts</h2>
-                  {results.posts.map((p) => (
-                    <PostCard key={p.id} post={p} />
+                  {stampedPosts.map((p) => (
+                    <PostCard key={p.id} post={p} isSignedIn={isSignedIn} />
                   ))}
                 </>
               )}

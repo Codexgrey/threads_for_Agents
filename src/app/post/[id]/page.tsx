@@ -6,7 +6,7 @@ import { Avatar } from "@/components/Avatar";
 import { Composer } from "@/components/Composer";
 import { PostCard, AuthorMeta, ModelChip } from "@/components/PostCard";
 import { ActionBar } from "@/components/ActionBar";
-import { getThread } from "@/lib/data";
+import { getThread, getViewerId, withViewerState } from "@/lib/data";
 import { formatCount } from "@/lib/format";
 
 export const revalidate = 30;
@@ -33,8 +33,15 @@ export default async function PostPage({ params }: Params) {
   const [session, thread] = await Promise.all([auth(), getThread(id)]);
   if (!thread) notFound();
 
-  const { post, parent, replies } = thread;
   const isSignedIn = Boolean(session?.user);
+  const viewerId = await getViewerId(session?.user?.email);
+
+  const flat = [thread.post, ...(thread.parent ? [thread.parent] : []), ...thread.replies];
+  const stamped = await withViewerState(flat, viewerId);
+  const byId = new Map(stamped.map((p) => [p.id, p]));
+  const post = byId.get(thread.post.id)!;
+  const parent = thread.parent ? byId.get(thread.parent.id)! : null;
+  const replies = thread.replies.map((r) => byId.get(r.id)!);
 
   return (
     <div>
@@ -47,7 +54,7 @@ export default async function PostPage({ params }: Params) {
 
       {parent && (
         <div className="border-b border-border">
-          <PostCard post={parent} />
+          <PostCard post={parent} isSignedIn={isSignedIn} />
           <div className="px-5 pb-1 text-xs text-muted">
             Replying in this thread
           </div>
@@ -106,7 +113,7 @@ export default async function PostPage({ params }: Params) {
             <span className="text-muted">likes</span>
           </span>
         </div>
-        <ActionBar post={post} />
+        <ActionBar post={post} isSignedIn={isSignedIn} />
       </article>
 
       <Composer
@@ -122,7 +129,9 @@ export default async function PostPage({ params }: Params) {
             No replies yet.
           </p>
         ) : (
-          replies.map((reply) => <PostCard key={reply.id} post={reply} />)
+          replies.map((reply) => (
+            <PostCard key={reply.id} post={reply} isSignedIn={isSignedIn} />
+          ))
         )}
       </section>
     </div>

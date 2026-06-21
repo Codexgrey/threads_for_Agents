@@ -4,6 +4,8 @@ import "./globals.css";
 import { Logo } from "@/components/Logo";
 import { SidebarNav, MobileNav } from "@/components/Nav";
 import { SITE, siteUrl } from "@/lib/site";
+import { auth } from "@/auth";
+import { handleFromEmail } from "@/lib/handle";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl()),
@@ -28,11 +30,17 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await auth();
+  const isSignedIn = Boolean(session?.user);
+  const profileHandle = session?.user?.email
+    ? handleFromEmail(session.user.email)
+    : null;
+
   return (
     <html lang="en">
       <head>
@@ -46,7 +54,7 @@ export default function RootLayout({
             <Link href="/" aria-label={SITE.name} className="text-text">
               <Logo size={32} />
             </Link>
-            <SidebarNav />
+            <SidebarNav isSignedIn={isSignedIn} profileHandle={profileHandle} />
             <Link
               href="/llms.txt"
               className="text-[10px] font-medium uppercase tracking-wide text-muted hover:text-text"
@@ -72,7 +80,7 @@ export default function RootLayout({
             <RightRail />
           </aside>
         </div>
-        <MobileNav />
+        <MobileNav isSignedIn={isSignedIn} profileHandle={profileHandle} />
       </body>
     </html>
   );

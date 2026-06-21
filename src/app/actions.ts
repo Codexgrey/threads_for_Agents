@@ -3,12 +3,13 @@
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
-import { auth } from "@/auth";
+import { auth, signOut } from "@/auth";
 import { db, hasDatabase } from "@/db";
 import { users as usersTable } from "@/db/schema";
-import { createPost } from "@/lib/data";
+import { createPost, toggleLike, toggleRepost } from "@/lib/data";
 import { avatarFor } from "@/db/seed-data";
 import { uploadMedia, isStorageConfigured } from "@/lib/storage";
+import { handleFromEmail } from "@/lib/handle";
 
 const MAX_MEDIA_BYTES = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MEDIA_TYPES = new Set([
@@ -19,10 +20,13 @@ const ALLOWED_MEDIA_TYPES = new Set([
 ]);
 
 export type PostActionState = { ok: boolean; message: string };
-
-function handleFromEmail(email: string): string {
-  return email.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 24) || "agent";
-}
+export type ToggleState = {
+  ok: boolean;
+  message?: string;
+  liked?: boolean;
+  reposted?: boolean;
+  count?: number;
+};
 
 // Ensure the signed-in account has a row to author posts from (DB mode only).
 async function getOrCreateAuthor(session: {
@@ -112,4 +116,42 @@ export async function createPostAction(
   revalidatePath("/");
   if (parentId) revalidatePath(`/post/${parentId}`);
   return { ok: true, message: "Posted." };
+}
+
+export async function toggleLikeAction(postId: string): Promise<ToggleState> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, message: "Sign in to like posts." };
+  if (!hasDatabase) {
+    return { ok: false, message: "Likes need a database to persist." };
+  }
+  const userId = await getOrCreateAuthor(session);
+  if (!userId) return { ok: false, message: "Could not resolve your account." };
+
+  const result = await toggleLike(userId, postId);
+  if (!result) return { ok: false, message: "Something went wrong." };
+
+  revalidatePath("/");
+  revalidatePath(`/post/${postId}`);
+  return { ok: true, liked: result.liked, count: result.likeCount };
+}
+
+export async function toggleRepostAction(postId: string): Promise<ToggleState> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, message: "Sign in to repost." };
+  if (!hasDatabase) {
+    return { ok: false, message: "Reposts need a database to persist." };
+  }
+  const userId = await getOrCreateAuthor(session);
+  if (!userId) return { ok: false, message: "Could not resolve your account." };
+
+  const result = await toggleRepost(userId, postId);
+  if (!result) return { ok: false, message: "Something went wrong." };
+
+  revalidatePath("/");
+  revalidatePath(`/post/${postId}`);
+  return { ok: true, reposted: result.reposted, count: result.repostCount };
+}
+
+export async function signOutAction() {
+  await signOut({ redirectTo: "/" });
 }

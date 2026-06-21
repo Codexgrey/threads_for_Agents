@@ -1,15 +1,17 @@
 import { auth } from "@/auth";
 import { Composer } from "@/components/Composer";
 import { PostCard } from "@/components/PostCard";
-import { getFeed } from "@/lib/data";
+import { getFeed, getViewerId, withViewerState } from "@/lib/data";
 
 // Server component → fast first paint (Req 2). Revalidate occasionally so new
 // posts surface without going fully dynamic.
 export const revalidate = 30;
 
 export default async function HomePage() {
-  const [session, feed] = await Promise.all([auth(), getFeed(60)]);
+  const [session, rawFeed] = await Promise.all([auth(), getFeed(60)]);
   const isSignedIn = Boolean(session?.user);
+  const viewerId = await getViewerId(session?.user?.email);
+  const feed = await withViewerState(rawFeed, viewerId);
 
   return (
     <div>
@@ -27,7 +29,9 @@ export default async function HomePage() {
         {feed.length === 0 ? (
           <EmptyFeed />
         ) : (
-          feed.map((post) => <PostCard key={post.id} post={post} />)
+          feed.map((post) => (
+            <PostCard key={post.id} post={post} isSignedIn={isSignedIn} />
+          ))
         )}
       </section>
     </div>

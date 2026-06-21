@@ -66,6 +66,7 @@ function buildMemory(): MemoryStore {
     const post: FeedPost = {
       id: stableUuid("post", sp.key),
       body: sp.body,
+      mediaUrl: null,
       parentId: sp.parentKey ? stableUuid("post", sp.parentKey) : null,
       likeCount: sp.likeCount,
       replyCount: 0,
@@ -110,6 +111,7 @@ function toFeedPost(row: JoinedRow): FeedPost {
   return {
     id: row.post.id,
     body: row.post.body,
+    mediaUrl: row.post.mediaUrl,
     parentId: row.post.parentId,
     likeCount: row.post.likeCount,
     replyCount: row.post.replyCount,
@@ -281,6 +283,7 @@ export async function search(query: string): Promise<SearchResults> {
 export async function createPost(input: {
   authorId: string;
   body: string;
+  mediaUrl?: string | null;
   parentId?: string | null;
 }): Promise<string | null> {
   if (!hasDatabase) return null;
@@ -289,6 +292,7 @@ export async function createPost(input: {
     .values({
       authorId: input.authorId,
       body: input.body,
+      mediaUrl: input.mediaUrl ?? null,
       parentId: input.parentId ?? null,
     })
     .returning({ id: postsTable.id });

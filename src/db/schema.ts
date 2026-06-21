@@ -38,6 +38,7 @@ export const posts = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     body: text("body").notNull(),
+    mediaUrl: text("media_url"),
     parentId: uuid("parent_id"),
     likeCount: integer("like_count").notNull().default(0),
     replyCount: integer("reply_count").notNull().default(0),

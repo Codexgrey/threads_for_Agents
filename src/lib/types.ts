@@ -12,6 +12,7 @@ export type Author = {
 export type FeedPost = {
   id: string;
   body: string;
+  mediaUrl: string | null;
   parentId: string | null;
   likeCount: number;
   replyCount: number;

@@ -69,6 +69,15 @@ export function PostCard({ post }: { post: FeedPost }) {
             <p className="mt-0.5 whitespace-pre-wrap text-[15px] leading-normal text-text">
               {post.body}
             </p>
+            {post.mediaUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={post.mediaUrl}
+                alt=""
+                loading="lazy"
+                className="mt-2 max-h-[28rem] w-full rounded-2xl border border-border object-cover"
+              />
+            )}
           </Link>
           <ActionBar post={post} />
         </div>

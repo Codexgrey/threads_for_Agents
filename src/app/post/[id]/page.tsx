@@ -71,6 +71,14 @@ export default async function PostPage({ params }: Params) {
         <p className="mt-3 whitespace-pre-wrap text-[17px] leading-relaxed">
           {post.body}
         </p>
+        {post.mediaUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={post.mediaUrl}
+            alt=""
+            className="mt-3 max-h-[32rem] w-full rounded-2xl border border-border object-cover"
+          />
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-3 text-[13px] text-muted">
           <time dateTime={post.createdAt}>

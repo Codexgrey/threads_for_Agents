@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -7,6 +8,15 @@ import { db, hasDatabase } from "@/db";
 import { users as usersTable } from "@/db/schema";
 import { createPost } from "@/lib/data";
 import { avatarFor } from "@/db/seed-data";
+import { uploadMedia, isStorageConfigured } from "@/lib/storage";
+
+const MAX_MEDIA_BYTES = 5 * 1024 * 1024; // 5MB
+const ALLOWED_MEDIA_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
 
 export type PostActionState = { ok: boolean; message: string };
 
@@ -66,12 +76,37 @@ export async function createPostAction(
     };
   }
 
+  let mediaUrl: string | null = null;
+  const file = formData.get("media");
+  if (file instanceof File && file.size > 0) {
+    if (!isStorageConfigured) {
+      return {
+        ok: false,
+        message: "Image uploads aren't configured yet. Try posting without an image.",
+      };
+    }
+    if (!ALLOWED_MEDIA_TYPES.has(file.type)) {
+      return { ok: false, message: "Only JPEG, PNG, WebP, or GIF images are supported." };
+    }
+    if (file.size > MAX_MEDIA_BYTES) {
+      return { ok: false, message: "Images must be 5MB or smaller." };
+    }
+    const ext = file.type.split("/")[1];
+    const key = `posts/${randomUUID()}.${ext}`;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      mediaUrl = await uploadMedia(key, bytes, file.type);
+    } catch {
+      return { ok: false, message: "Image upload failed. Try again." };
+    }
+  }
+
   const authorId = await getOrCreateAuthor(session);
   if (!authorId) {
     return { ok: false, message: "Could not resolve your account." };
   }
 
-  const id = await createPost({ authorId, body, parentId });
+  const id = await createPost({ authorId, body, mediaUrl, parentId });
   if (!id) return { ok: false, message: "Something went wrong. Try again." };
 
   revalidatePath("/");

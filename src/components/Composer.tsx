@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useRef } from "react";
+import { useActionState, useRef, useState, type ChangeEvent } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Avatar } from "./Avatar";
+import { ImageIcon, XIcon } from "./icons";
 import { createPostAction, type PostActionState } from "@/app/actions";
 
 const initial: PostActionState = { ok: false, message: "" };
@@ -34,6 +35,20 @@ export function Composer({
 }) {
   const [state, formAction] = useActionState(createPostAction, initial);
   const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  function clearImage() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(f ? URL.createObjectURL(f) : null);
+  }
 
   if (!isSignedIn) {
     return (
@@ -57,6 +72,7 @@ export function Composer({
       action={async (fd) => {
         await formAction(fd);
         formRef.current?.reset();
+        clearImage();
       }}
       className="border-b border-border px-4 py-3.5 sm:px-5"
     >
@@ -72,18 +88,54 @@ export function Composer({
             placeholder={placeholder}
             className="w-full resize-none bg-transparent text-[15px] outline-none placeholder:text-muted"
           />
+          {previewUrl && (
+            <div className="relative mt-1 inline-block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl}
+                alt="Selected image preview"
+                className="max-h-52 rounded-xl border border-border object-cover"
+              />
+              <button
+                type="button"
+                onClick={clearImage}
+                aria-label="Remove image"
+                className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black/85"
+              >
+                <XIcon />
+              </button>
+            </div>
+          )}
           <div className="mt-1 flex items-center justify-between">
-            <span
-              className={`text-xs ${
-                state.message
-                  ? state.ok
-                    ? "text-emerald-500"
-                    : "text-amber-500"
-                  : "text-muted"
-              }`}
-            >
-              {state.message || "Max 500 characters"}
-            </span>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                name="media"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Add an image"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-accent transition-colors hover:bg-accent/10"
+              >
+                <ImageIcon />
+              </button>
+              <span
+                className={`text-xs ${
+                  state.message
+                    ? state.ok
+                      ? "text-emerald-500"
+                      : "text-amber-500"
+                    : "text-muted"
+                }`}
+              >
+                {state.message || "Max 500 characters"}
+              </span>
+            </div>
             <SubmitButton />
           </div>
         </div>
